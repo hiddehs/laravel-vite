@@ -93,4 +93,15 @@ return [
         'vite:aliases',
         // 'typescript:generate'
     ],
+    /*
+    |--------------------------------------------------------------------------
+    | CSP Nonce Function
+    |--------------------------------------------------------------------------
+    | Defines the function to call when creating html nonce tags (strict 
+    | CSP policy)
+    */
+    'csp_nonce'        => [
+        'enabled'  => false,
+        'function' => 'csp_nonce',
+    ]
 ];
