@@ -1,6 +1,7 @@
 .idea
 .php_cs
 .php_cs.cache
+.php-cs-fixer.cache
 .phpunit.result.cache
 build
 coverage
@@ -8,3 +9,6 @@ phpunit.xml
 psalm.xml
 vendor
 tests/__sandbox__
+node_modules
+.pnpm-debug.log
+**/node_modules
