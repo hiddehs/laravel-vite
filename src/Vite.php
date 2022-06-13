@@ -2,196 +2,92 @@
 
 namespace Innocenzi\Vite;
 
-use Illuminate\Contracts\Support\Htmlable;
-use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\App;
-use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\HtmlString;
-use Illuminate\Support\Str;
+use Closure;
+use Illuminate\Support\Traits\Macroable;
 
-class Vite
+final class Vite
 {
-    protected ?Manifest $manifest;
-    protected ?string $manifestPath;
-    protected ?bool $isDevelopmentServerRunning;
+    use Macroable;
+
+    const CLIENT_SCRIPT_PATH = '@vite/client';
+
+    protected array $configs = [];
 
     /**
-     * Creates a new Vite instance.
+     * @var (Closure(string, Innocenzi\Vite\Chunk|null): string)
      */
-    public function __construct(string $manifestPath = null)
+    public static Closure|null $makeScriptTagsCallback = null;
+
+    /**
+     * @var (Closure(string, Innocenzi\Vite\Chunk|null): string)
+     */
+    public static Closure|null $makeStyleTagsCallback = null;
+
+    /**
+     * @var (Closure(string, Innocenzi\Vite\Chunk|null): string)
+     */
+    public static Closure|null $makePreloadTagsCallback = null;
+
+    /**
+     * @var (Closure(Innocenzi\Vite\Configuration): bool|null)
+     */
+    public static Closure|null $useManifestCallback = null;
+
+    /**
+     * Gets the given configuration or the default one.
+     */
+    public function config(string $name = null): Configuration
     {
-        $this->manifestPath = $manifestPath;
+        $name ??= config('vite.default');
+
+        return $this->configs[$name] ??= new Configuration($name);
     }
 
     /**
-     * Returns the manifest, reading it from the disk if necessary.
+     * Sets the logic for creating a script tag.
+     *
+     * @param (Closure(string, Innocenzi\Vite\Chunk|null): string) $callback
      */
-    public function getManifest(): ?Manifest
+    public static function makeScriptTagsUsing(Closure $callback = null): void
     {
-        return $this->manifest ??= Manifest::read($this->manifestPath);
+        static::$makeScriptTagsCallback = $callback;
     }
 
     /**
-     * Gets the script tag for the client module.
+     * Sets the logic for creating a style tag.
+     *
+     * @param (Closure(string, Innocenzi\Vite\Chunk|null): string) $callback
      */
-    public function getClientScript(): Htmlable
+    public static function makeStyleTagsUsing(Closure $callback = null): void
     {
-        if (! $this->isDevelopmentServerRunning()) {
-            return new HtmlString();
-        }
-
-        return $this->createDevelopmentScriptTag('@vite/client');
+        static::$makeStyleTagsCallback = $callback;
     }
 
     /**
-     * Gets the script tag for React's refresh runtime.
+     * Sets the logic for creating a module preload tag.
+     *
+     * @param (Closure(string, Innocenzi\Vite\Chunk|null): string) $callback
      */
-    public function getReactRefreshRuntimeScript(): Htmlable
+    public static function makePreloadTagsUsing(Closure $callback = null): void
     {
-        if (! $this->isDevelopmentServerRunning()) {
-            return new HtmlString();
-        }
-
-        $url = config('vite.dev_url');
-
-        $script = <<<HTML
-        <script type="module">
-            import RefreshRuntime from "{$url}/@react-refresh"
-            RefreshRuntime.injectIntoGlobalHook(window)
-            window.\$RefreshReg$ = () => {}
-            window.\$RefreshSig$ = () => (type) => type
-            window.__vite_plugin_react_preamble_installed__ = true
-        </script>
-        HTML;
-
-        return new HtmlString($script);
+        static::$makePreloadTagsCallback = $callback;
     }
 
     /**
-     * Gets an entry from the given name.
+     * Sets the logic for determining if the manifest should be used.
+     *
+     * @param (Closure(Innocenzi\Vite\Configuration): bool|null) $callback
      */
-    public function getEntry(string $name): Htmlable
+    public static function useManifest(Closure $callback = null): void
     {
-        if ($this->shouldUseManifest()) {
-            return $this->getManifest()->getEntry($name);
-        }
-
-        return $this->getEntries()->first(fn (Htmlable $entry) => Str::contains($entry->toHtml(), $name))
-            ?? $this->createDevelopmentScriptTag($name);
+        static::$useManifestCallback = $callback;
     }
 
     /**
-     * Gets every registered or automatic entry point.
+     * Execute a method against the default configuration.
      */
-    public function getEntries(): Collection
+    public function __call($method, $parameters)
     {
-        if ($this->shouldUseManifest()) {
-            return $this->getManifest()->getEntries();
-        }
-
-        return $this->findEntrypoints()
-            ->map(fn (\SplFileInfo $file) => $this->createDevelopmentScriptTag(
-                Str::of($file->getPathname())
-                    ->replace(base_path(), '')
-                    ->replace('\\', '/')
-                    ->ltrim('/')
-            ));
-    }
-
-    /**
-     * Finds entrypoints from the configuration.
-     */
-    public function findEntrypoints(): Collection
-    {
-        $paths = collect(config('vite.entrypoints', []))
-            ->map(fn ($directory) => base_path($directory));
-
-        return $paths->filter(fn ($directory) => File::isDirectory($directory))
-            ->flatMap(fn ($directory) => File::files($directory))
-            ->merge($paths->filter(fn ($directory) => File::isFile($directory))->map(fn (string $path) => new \SplFileInfo($path)))
-            ->unique(fn (\SplFileInfo $file) => $file->getPathname())
-            ->filter(fn (\SplFileInfo $file) => ! collect(config('vite.ignore_patterns'))
-            ->some(fn ($pattern) => preg_match($pattern, $file->getFilename())));
-    }
-
-    /**
-     * Gets the script tags for the Vite client and the entrypoints.
-     */
-    public function getClientAndEntrypointTags(): Htmlable
-    {
-        $entries = collect();
-
-        if (! $this->shouldUseManifest()) {
-            $entries->push($this->getClientScript());
-        }
-
-        return new HtmlString(
-            $entries->merge($this->getEntries())
-                ->map(fn (Htmlable $entry) => $entry->toHtml())
-                ->join('')
-        );
-    }
-
-    /**
-     * Checks if the manifest should be used to get an entry.
-     */
-    protected function shouldUseManifest(): bool
-    {
-        if (! App::environment('local')) {
-            return true;
-        }
-
-        if (! is_numeric(config('vite.ping_timeout'))) {
-            return false;
-        }
-
-        if (! $this->isDevelopmentServerRunning()) {
-            return true;
-        }
-
-        return false;
-    }
-
-    /**
-     * Checks if the development server is running.
-     */
-    public function isDevelopmentServerRunning(): bool
-    {
-        try {
-            return $this->isDevelopmentServerRunning ??= Http::withOptions([
-                'connect_timeout' => config('vite.ping_timeout'),
-                'verify' => false,
-            ])->get(config('vite.dev_url') . '/@vite/client')->successful();
-        } catch (\Throwable $th) {
-        }
-
-        return false;
-    }
-
-    /**
-     * Creates the script tag for including the development server.
-     */
-    protected function createDevelopmentScriptTag(string $path): Htmlable
-    {
-        // I suspect ASSET_URL should be takin into account here.
-        // If you find out it does, feel free to open an issue.
-        return new HtmlString(sprintf(
-            '<script type="module" src="%s%s"></script>',
-            Str::finish(config('vite.dev_url'), '/'),
-            $path
-        ));
-    }
-
-    /**
-     * Gets a valid URL for the given asset. During development, the returned URL will be relative to the development server.
-     */
-    public function getAssetUrl(string $path): string
-    {
-        if ($this->shouldUseManifest()) {
-            return asset(sprintf('/%s/%s', config('vite.build_path'), $path));
-        }
-
-        return sprintf('%s/%s', config('vite.dev_url'), $path);
+        return $this->config()->{$method}(...$parameters);
     }
 }

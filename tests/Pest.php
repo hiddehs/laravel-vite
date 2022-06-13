@@ -11,10 +11,14 @@
 |
 */
 
-use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Innocenzi\Vite\Configuration;
+use Innocenzi\Vite\Manifest;
+use Innocenzi\Vite\Tests\TestCase;
 use Innocenzi\Vite\Vite;
+use Pest\TestSuite;
 
 uses(Innocenzi\Vite\Tests\TestCase::class)->in('Unit');
 uses(Innocenzi\Vite\Tests\TestCase::class)->in('Features');
@@ -26,29 +30,95 @@ uses(Innocenzi\Vite\Tests\TestCase::class)->in('Features');
 */
 
 /**
+ * Gets the current test case.
+ */
+function this(): TestCase
+{
+    return TestSuite::getInstance()->test;
+}
+
+/**
  * Sets the environment.
  */
 function set_env(string $env): void
 {
-    App::bind('env', fn () => $env);
+    app()->bind('env', fn () => $env);
 }
 
-function get_vite(string $manifest = 'manifest.json'): Vite
+/**
+ * Gets a path relative to the fixtures.
+ */
+function fixtures_path(string $path = ''): string
 {
-    return new Vite(__DIR__ . "/Unit/manifests/${manifest}");
+    $path = (string) Str::of($path)->start('/');
+
+    return realpath(__DIR__ . "/Fixtures/${path}");
+}
+
+/**
+ * Uses a configuration with the given manifest.
+ */
+function using_manifest(string $path): Configuration
+{
+    return new Configuration('default', Manifest::read(fixtures_path($path)));
+}
+
+/**
+ * Gets the given manifest.
+ */
+function get_manifest(string $manifest = 'manifest.json'): Manifest
+{
+    return Manifest::read(fixtures_path("manifests/${manifest}"));
+}
+
+/**
+ * Overrides the manifests' base paths.
+ */
+function set_fixtures_path(string $path = '')
+{
+    $dir = fixtures_path($path);
+    app()->bind('path.public', fn () => $dir . '/public');
+    app()->setBasePath($dir);
+}
+
+/**
+ * Sets up a Vite configuration.
+ */
+function set_vite_config(string $name, array $config): void
+{
+    config()->set("vite.configs.${name}", array_replace_recursive(config('vite.configs.default'), $config));
+}
+
+/**
+ * Mocks the dev server.
+ */
+function with_dev_server(bool $reacheable = true)
+{
+    if (!$reacheable) {
+        return Http::fake(fn () => Http::response(status: 503));
+    }
+
+    return Http::fake([
+        Vite::CLIENT_SCRIPT_PATH => Http::response(status: 200),
+        '*' => Http::response(status: 404),
+    ]);
 }
 
 /**
  * Creates a sandbox in which the base path is updated.
  */
-function sandbox(callable $callback, string $base = __DIR__): string
+function sandbox(callable $callback, string $base = __DIR__, bool $preserve = false): void
 {
-    return tap($base . '/__sandbox__/' . Str::random(), function (string $directory) use ($callback) {
-        $initialBasePath = base_path();
-        App::setBasePath($directory);
-        File::makeDirectory($directory, 0755, true);
-        $callback($directory);
-        File::deleteDirectory($directory);
-        App::setBasePath($initialBasePath);
-    });
+    $sandbox_base = $base . '/__sandbox__/';
+    $sandbox_path = $sandbox_base . Str::random();
+    $initial_base_path = base_path();
+
+    app()->setBasePath($sandbox_path);
+    File::makeDirectory($sandbox_path, recursive: true);
+    $callback($sandbox_path);
+    app()->setBasePath($initial_base_path);
+
+    if (!$preserve) {
+        File::deleteDirectory($sandbox_base);
+    }
 }

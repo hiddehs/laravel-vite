@@ -1,59 +1,74 @@
 <?php
 
-if (! function_exists('vite_client')) {
+use Innocenzi\Vite\Configuration;
+use Innocenzi\Vite\Vite;
+
+if (!function_exists('vite')) {
+    /**
+     * Gets the given Vite configuration instance or the default one.
+     */
+    function vite(string $config = null): Configuration
+    {
+        return app()->make(Vite::class)->config($config);
+    }
+}
+
+if (!function_exists('vite_client')) {
     /**
      * Get the HTML script tag that includes the Vite client.
-     *
-     * @return string
      */
-    function vite_client()
+    function vite_client(string $configurationName = null)
     {
-        return app()->make(Innocenzi\Vite\Vite::class)->getClientScript();
+        return vite($configurationName)->getClientScriptTag();
     }
 }
 
-if (! function_exists('vite_react_refresh_runtime')) {
+if (!function_exists('vite_react_refresh_runtime')) {
     /**
      * Get the HTML script tag that includes the React Refresh runtime.
-     *
-     * @return string
      */
-    function vite_react_refresh_runtime()
+    function vite_react_refresh_runtime(string $configurationName = null)
     {
-        return app()->make(Innocenzi\Vite\Vite::class)->getReactRefreshRuntimeScript();
+        return vite($configurationName)->getReactRefreshRuntimeScript();
     }
 }
 
-if (! function_exists('vite_entry')) {
+if (!function_exists('vite_tag')) {
     /**
-     * Get the HTML tags that include the given entry.
-     *
-     * @return string
+     * Get the HTML tags which path name include the given entry name.
      */
-    function vite_entry(string $entry)
+    function vite_tag(string $entry, string $configurationName = null)
     {
-        return app()->make(Innocenzi\Vite\Vite::class)->getEntry($entry);
+        return vite($configurationName)->getTag($entry);
     }
 }
 
-if (! function_exists('vite_tags')) {
+if (!function_exists('vite_tags')) {
     /**
      * Get the HTML tags for the Vite client and every configured entrypoint.
-     *
-     * @return string
      */
-    function vite_tags()
+    function vite_tags(string $configurationName = null)
     {
-        return app()->make(Innocenzi\Vite\Vite::class)->getClientAndEntrypointTags();
+        return vite($configurationName)->getTags();
     }
 }
 
-if (! function_exists('vite_asset')) {
+if (!function_exists('vite_asset')) {
     /**
-     * Gets a valid URL for the given asset.
+     * Gets a valid URL for the given asset path.
      */
-    function vite_asset(string $path)
+    function vite_asset(string $path, string $configurationName = null)
     {
-        return app()->make(Innocenzi\Vite\Vite::class)->getAssetUrl($path);
+        return vite($configurationName)->getAssetUrl($path);
+    }
+}
+
+if (!function_exists('vite_entry')) {
+    /**
+     * Gets the URL for the given entrypoint.
+     */
+    function vite_entry(string $path, string $configurationName = null)
+    {
+        return vite($configurationName)->getEntryUrl($path);
     }
 }
